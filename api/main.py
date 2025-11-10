@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import torch
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 from PIL import Image
 import io
 from typing import List, Dict
@@ -42,6 +43,8 @@ class_names = []
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Confidence threshold for accepting predictions (configurable via env)
 CONF_THRESHOLD = float(os.getenv('PREDICTION_CONF_THRESHOLD', '0.6'))
+# Test-time augmentation mode: 'basic' (orig + hflip) or 'extended' (+ 90/180/270)
+TTA_MODE = os.getenv('PREDICTION_TTA', 'extended').lower()
 
 # Image preprocessing
 transform = transforms.Compose([
@@ -89,20 +92,55 @@ def preprocess_image(image_bytes: bytes) -> torch.Tensor:
         raise HTTPException(status_code=400, detail=f"Error processing image: {str(e)}")
 
 
-def predict(image_tensor: torch.Tensor) -> Dict:
+def make_tta_tensors(image: Image.Image) -> torch.Tensor:
+    """Create a batch tensor with TTA views based on configured mode."""
+    images: List[Image.Image] = []
+    # Always include original
+    images.append(image)
+    # Basic TTA: original + horizontal flip
+    images.append(F.hflip(image))
+    if TTA_MODE == 'extended':
+        # Add 90/180/270 degree rotations
+        images.append(F.rotate(image, 90))
+        images.append(F.rotate(image, 180))
+        images.append(F.rotate(image, 270))
+    # Transform and stack into batch
+    tensors = [transform(img) for img in images]
+    batch = torch.stack(tensors, dim=0)
+    return batch
+
+
+def predict_with_tta(image_bytes: bytes) -> Dict:
     """Make prediction on preprocessed image."""
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded. Please train a model first.")
     
     model.eval()
     with torch.no_grad():
-        image_tensor = image_tensor.to(device)
-        # Test-time augmentation: average predictions of original and horizontal flip
-        outputs_orig = model(image_tensor)
-        outputs_flip = model(torch.flip(image_tensor, dims=[3]))  # flip width dimension
-        outputs = (outputs_orig + outputs_flip) / 2.0
-        probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+        # Prepare TTA batch
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        batch = make_tta_tensors(image).to(device)
+        # Forward pass for all views, average logits
+        logits = model(batch)  # shape: [N, C]
+        mean_logits = logits.mean(dim=0)
+        probabilities = torch.nn.functional.softmax(mean_logits, dim=0)
         confidence, predicted_idx = torch.max(probabilities, 0)
+
+        # Get top 3 predictions
+        top3_probs, top3_indices = torch.topk(probabilities, min(3, len(class_names)))
+        
+        predictions = []
+        for prob, idx in zip(top3_probs, top3_indices):
+            predictions.append({
+                'class': class_names[idx.item()],
+                'confidence': prob.item()
+            })
+        
+        result = {
+            'predicted_class': class_names[predicted_idx.item()],
+            'confidence': confidence.item(),
+            'top_predictions': predictions
+        }
 
         # Reject low-confidence predictions as out-of-distribution
         if confidence.item() < CONF_THRESHOLD:
@@ -114,22 +152,8 @@ def predict(image_tensor: torch.Tensor) -> Dict:
                     "threshold": CONF_THRESHOLD,
                 }
             )
-        
-        # Get top 3 predictions
-        top3_probs, top3_indices = torch.topk(probabilities, min(3, len(class_names)))
-        
-        predictions = []
-        for prob, idx in zip(top3_probs, top3_indices):
-            predictions.append({
-                'class': class_names[idx.item()],
-                'confidence': prob.item()
-            })
-        
-        return {
-            'predicted_class': class_names[predicted_idx.item()],
-            'confidence': confidence.item(),
-            'top_predictions': predictions
-        }
+
+        return result
 
 
 @app.get("/")
@@ -156,7 +180,8 @@ async def health_check():
         "model_loaded": model is not None,
         "device": str(device),
         "num_classes": len(class_names) if class_names else 0,
-        "confidence_threshold": CONF_THRESHOLD
+        "confidence_threshold": CONF_THRESHOLD,
+        "tta_mode": TTA_MODE
     }
 
 
@@ -187,11 +212,8 @@ async def predict_image(file: UploadFile = File(...)):
         # Read image
         image_bytes = await file.read()
         
-        # Preprocess
-        image_tensor = preprocess_image(image_bytes)
-        
-        # Predict
-        result = predict(image_tensor)
+        # Predict with multi-angle TTA
+        result = predict_with_tta(image_bytes)
         
         return JSONResponse(content=result)
     
@@ -226,8 +248,7 @@ async def predict_batch(files: List[UploadFile] = File(...)):
         
         try:
             image_bytes = await file.read()
-            image_tensor = preprocess_image(image_bytes)
-            result = predict(image_tensor)
+            result = predict_with_tta(image_bytes)
             result["filename"] = file.filename
             results.append(result)
         except Exception as e:
