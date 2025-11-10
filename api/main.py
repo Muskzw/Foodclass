@@ -40,6 +40,8 @@ app.add_middleware(
 model = None
 class_names = []
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# Confidence threshold for accepting predictions (configurable via env)
+CONF_THRESHOLD = float(os.getenv('PREDICTION_CONF_THRESHOLD', '0.6'))
 
 # Image preprocessing
 transform = transforms.Compose([
@@ -100,6 +102,18 @@ def predict(image_tensor: torch.Tensor) -> Dict:
         outputs_flip = model(torch.flip(image_tensor, dims=[3]))  # flip width dimension
         outputs = (outputs_orig + outputs_flip) / 2.0
         probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+        confidence, predicted_idx = torch.max(probabilities, 0)
+
+        # Reject low-confidence predictions as out-of-distribution
+        if confidence.item() < CONF_THRESHOLD:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Image appears to be outside the trained dataset classes",
+                    "max_confidence": round(confidence.item(), 4),
+                    "threshold": CONF_THRESHOLD,
+                }
+            )
         
         # Get top 3 predictions
         top3_probs, top3_indices = torch.topk(probabilities, min(3, len(class_names)))
@@ -141,7 +155,8 @@ async def health_check():
         "status": "healthy",
         "model_loaded": model is not None,
         "device": str(device),
-        "num_classes": len(class_names) if class_names else 0
+        "num_classes": len(class_names) if class_names else 0,
+        "confidence_threshold": CONF_THRESHOLD
     }
 
 
