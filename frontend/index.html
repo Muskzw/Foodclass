@@ -359,8 +359,19 @@
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Prediction failed');
+                    let errorMsg = 'Prediction failed';
+                    try {
+                        const errorData = await response.json();
+                        // FastAPI may send detail as string or object
+                        if (typeof errorData.detail === 'string') {
+                            errorMsg = errorData.detail;
+                        } else if (errorData.detail && errorData.detail.error) {
+                            const maxConf = errorData.detail.max_confidence !== undefined ? ` (max confidence: ${(errorData.detail.max_confidence*100).toFixed(2)}%)` : '';
+                            const thr = errorData.detail.threshold !== undefined ? ` (threshold: ${(errorData.detail.threshold*100).toFixed(2)}%)` : '';
+                            errorMsg = `${errorData.detail.error}${maxConf}${thr}`;
+                        }
+                    } catch (_) {}
+                    throw new Error(errorMsg);
                 }
 
                 const data = await response.json();
@@ -425,7 +436,8 @@
                 
                 if (data.model_loaded) {
                     statusIndicator.classList.remove('error');
-                    statusText.textContent = `API Connected | Model Loaded (${data.num_classes} classes)`;
+                    const thr = data.confidence_threshold !== undefined ? ` | Threshold: ${(data.confidence_threshold*100).toFixed(0)}%` : '';
+                    statusText.textContent = `API Connected | Model Loaded (${data.num_classes} classes)${thr}`;
                 } else {
                     statusIndicator.classList.add('error');
                     statusText.textContent = 'API Connected | Model Not Loaded';
