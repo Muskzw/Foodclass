@@ -95,9 +95,11 @@ def predict(image_tensor: torch.Tensor) -> Dict:
     model.eval()
     with torch.no_grad():
         image_tensor = image_tensor.to(device)
-        outputs = model(image_tensor)
+        # Test-time augmentation: average predictions of original and horizontal flip
+        outputs_orig = model(image_tensor)
+        outputs_flip = model(torch.flip(image_tensor, dims=[3]))  # flip width dimension
+        outputs = (outputs_orig + outputs_flip) / 2.0
         probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
-        confidence, predicted_idx = torch.max(probabilities, 0)
         
         # Get top 3 predictions
         top3_probs, top3_indices = torch.topk(probabilities, min(3, len(class_names)))

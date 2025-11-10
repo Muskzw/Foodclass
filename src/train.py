@@ -32,7 +32,29 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
-        self.criterion = nn.CrossEntropyLoss()
+        # Compute class weights from training data if available (handles class imbalance)
+        class_weights_tensor = None
+        try:
+            if hasattr(self.train_loader, 'dataset') and hasattr(self.train_loader.dataset, 'labels'):
+                labels_list = self.train_loader.dataset.labels
+                if isinstance(labels_list, list) and len(labels_list) > 0:
+                    num_classes = int(max(labels_list)) + 1
+                    counts = [0] * num_classes
+                    for lbl in labels_list:
+                        counts[lbl] += 1
+                    # Inverse frequency; avoid div-by-zero
+                    weights = [0.0] * num_classes
+                    for i, c in enumerate(counts):
+                        weights[i] = 1.0 / c if c > 0 else 0.0
+                    # Normalize weights to keep average around 1
+                    total = sum(weights)
+                    if total > 0:
+                        weights = [w * (num_classes / total) for w in weights]
+                    class_weights_tensor = torch.tensor(weights, dtype=torch.float32, device=device)
+        except Exception:
+            class_weights_tensor = None
+
+        self.criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
         self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=3
