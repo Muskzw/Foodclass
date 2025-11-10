@@ -221,6 +221,7 @@
             align-items: center;
             gap: 10px;
         }
+        .api-status span { color: #f2f2f2; }
 
         .status-indicator {
             width: 12px;
@@ -446,6 +447,14 @@
                     
                     resultsContent.appendChild(item);
                 });
+
+                // Ambiguity warning if top-1 and top-2 are very close
+                if (data.top_predictions.length >= 2) {
+                    const margin = data.top_predictions[0].confidence - data.top_predictions[1].confidence;
+                    if (margin < 0.10) {
+                        showError(`Note: Prediction may be ambiguous (top-1 and top-2 differ by ${(margin*100).toFixed(1)}%). Consider increasing TTA or threshold.`);
+                    }
+                }
             } else {
                 const item = document.createElement('div');
                 item.className = 'result-item';
