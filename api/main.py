@@ -17,7 +17,7 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from PIL import Image
 import io
-from typing import List, Dict
+from typing import List, Dict, Optional
 import uvicorn
 
 from src.model import load_model
@@ -118,7 +118,7 @@ def make_tta_tensors(image: Image.Image) -> torch.Tensor:
     return batch
 
 
-def predict_with_tta(image_bytes: bytes) -> Dict:
+def predict_with_tta(image_bytes: bytes, threshold_override: Optional[float] = None, tta_override: Optional[str] = None) -> Dict:
     """Make prediction on preprocessed image."""
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded. Please train a model first.")
@@ -127,7 +127,17 @@ def predict_with_tta(image_bytes: bytes) -> Dict:
     with torch.no_grad():
         # Prepare TTA batch
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-        batch = make_tta_tensors(image).to(device)
+        global TTA_MODE
+        mode = (tta_override or TTA_MODE).lower()
+        # Temporarily switch TTA mode if override provided
+        original_mode = TTA_MODE
+        if tta_override is not None:
+            TTA_MODE = mode
+        try:
+            batch = make_tta_tensors(image).to(device)
+        finally:
+            if tta_override is not None:
+                TTA_MODE = original_mode
         # Forward pass for all views, average logits
         logits = model(batch)  # shape: [N, C]
         mean_logits = logits.mean(dim=0)
@@ -151,13 +161,14 @@ def predict_with_tta(image_bytes: bytes) -> Dict:
         }
 
         # Reject low-confidence predictions as out-of-distribution
-        if confidence.item() < CONF_THRESHOLD:
+        thr = CONF_THRESHOLD if threshold_override is None else float(threshold_override)
+        if confidence.item() < thr:
             raise HTTPException(
                 status_code=422,
                 detail={
                     "error": "Image appears to be outside the trained dataset classes",
                     "max_confidence": round(confidence.item(), 4),
-                    "threshold": CONF_THRESHOLD,
+                    "threshold": thr,
                 }
             )
 
@@ -202,7 +213,7 @@ async def get_classes():
 
 
 @app.post("/predict")
-async def predict_image(file: UploadFile = File(...)):
+async def predict_image(file: UploadFile = File(...), threshold: Optional[float] = None, tta: Optional[str] = None):
     """
     Predict food class from uploaded image.
     
@@ -220,8 +231,8 @@ async def predict_image(file: UploadFile = File(...)):
         # Read image
         image_bytes = await file.read()
         
-        # Predict with multi-angle TTA
-        result = predict_with_tta(image_bytes)
+        # Predict with multi-angle TTA and optional overrides
+        result = predict_with_tta(image_bytes, threshold_override=threshold, tta_override=tta)
         
         return JSONResponse(content=result)
     
@@ -232,7 +243,7 @@ async def predict_image(file: UploadFile = File(...)):
 
 
 @app.post("/predict/batch")
-async def predict_batch(files: List[UploadFile] = File(...)):
+async def predict_batch(files: List[UploadFile] = File(...), threshold: Optional[float] = None, tta: Optional[str] = None):
     """
     Predict food classes for multiple images.
     
@@ -256,7 +267,7 @@ async def predict_batch(files: List[UploadFile] = File(...)):
         
         try:
             image_bytes = await file.read()
-            result = predict_with_tta(image_bytes)
+            result = predict_with_tta(image_bytes, threshold_override=threshold, tta_override=tta)
             result["filename"] = file.filename
             results.append(result)
         except Exception as e:
