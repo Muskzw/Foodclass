@@ -95,15 +95,23 @@ def preprocess_image(image_bytes: bytes) -> torch.Tensor:
 def make_tta_tensors(image: Image.Image) -> torch.Tensor:
     """Create a batch tensor with TTA views based on configured mode."""
     images: List[Image.Image] = []
-    # Always include original
+    # Always include original and flip
     images.append(image)
-    # Basic TTA: original + horizontal flip
     images.append(F.hflip(image))
-    if TTA_MODE == 'extended':
+
+    if TTA_MODE in ('extended', 'max'):
         # Add 90/180/270 degree rotations
-        images.append(F.rotate(image, 90))
-        images.append(F.rotate(image, 180))
-        images.append(F.rotate(image, 270))
+        for angle in (90, 180, 270):
+            rot = F.rotate(image, angle)
+            images.append(rot)
+
+    if TTA_MODE == 'max':
+        # Add small-angle rotations with flips for robustness
+        small_angles = (-30, -15, 15, 30)
+        for angle in small_angles:
+            rot = F.rotate(image, angle)
+            images.append(rot)
+            images.append(F.hflip(rot))
     # Transform and stack into batch
     tensors = [transform(img) for img in images]
     batch = torch.stack(tensors, dim=0)
