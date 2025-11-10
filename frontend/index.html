@@ -240,6 +240,45 @@
             background: #f44336;
         }
 
+        .info-banner {
+            margin-top: 12px;
+            background: #141414;
+            color: #f2f2f2;
+            border-left: 4px solid #ffb703;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 0.95em;
+        }
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+            color: #ffb703;
+            margin-left: 6px;
+        }
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            width: 240px;
+            background-color: #0d0d0d;
+            color: #f2f2f2;
+            text-align: left;
+            border-radius: 8px;
+            border: 1px solid #333;
+            padding: 10px;
+            position: absolute;
+            z-index: 10;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
         .controls {
             display: flex;
             gap: 15px;
@@ -437,7 +476,9 @@
                     
                     item.innerHTML = `
                         <div>
-                            <div class="result-class">${pred.class}</div>
+                            <div class="result-class">${pred.class}
+                                ${index === 0 ? '<span class="tooltip">ⓘ<span class="tooltip-text">Top prediction. Use higher threshold or max TTA if unsure.</span></span>' : ''}
+                            </div>
                             <div class="confidence-bar">
                                 <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
                             </div>
@@ -452,7 +493,10 @@
                 if (data.top_predictions.length >= 2) {
                     const margin = data.top_predictions[0].confidence - data.top_predictions[1].confidence;
                     if (margin < 0.10) {
-                        showError(`Note: Prediction may be ambiguous (top-1 and top-2 differ by ${(margin*100).toFixed(1)}%). Consider increasing TTA or threshold.`);
+                        const info = document.createElement('div');
+                        info.className = 'info-banner';
+                        info.innerHTML = `Prediction may be ambiguous (top-1 and top-2 differ by ${(margin*100).toFixed(1)}%). Tips: set TTA to <b>max</b>, increase <b>confidence</b> to 70–85%, and ensure similar classes have enough images.`;
+                        resultsContent.prepend(info);
                     }
                 }
             } else {
@@ -461,7 +505,7 @@
                 const confidencePercent = (data.confidence * 100).toFixed(2);
                 item.innerHTML = `
                     <div>
-                        <div class="result-class">${data.predicted_class}</div>
+                        <div class="result-class">${data.predicted_class}<span class="tooltip">ⓘ<span class="tooltip-text">Single result view. For robustness, try extended or max TTA.</span></span></div>
                         <div class="confidence-bar">
                             <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
                         </div>
