@@ -467,54 +467,21 @@
         function displayResults(data) {
             resultsContent.innerHTML = '';
 
-            if (data.top_predictions) {
-                data.top_predictions.forEach((pred, index) => {
-                    const item = document.createElement('div');
-                    item.className = 'result-item';
-                    
-                    const confidencePercent = (pred.confidence * 100).toFixed(2);
-                    
-                    item.innerHTML = `
-                        <div>
-                            <div class="result-class">${pred.class}
-                                ${index === 0 ? '<span class="tooltip">ⓘ<span class="tooltip-text">Top prediction. Use higher threshold or max TTA if unsure.</span></span>' : ''}
-                            </div>
-                            <div class="confidence-bar">
-                                <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
-                            </div>
-                        </div>
-                        <div class="result-confidence">${confidencePercent}%</div>
-                    `;
-                    
-                    resultsContent.appendChild(item);
-                });
-
-                // Ambiguity warning if top-1 and top-2 are very close
-                if (data.top_predictions.length >= 2) {
-                    const margin = data.top_predictions[0].confidence - data.top_predictions[1].confidence;
-                    if (margin < 0.10) {
-                        const info = document.createElement('div');
-                        info.className = 'info-banner';
-                        info.innerHTML = `Prediction may be ambiguous (top-1 and top-2 differ by ${(margin*100).toFixed(1)}%). Tips: set TTA to <b>max</b>, increase <b>confidence</b> to 70–85%, and ensure similar classes have enough images.`;
-                        resultsContent.prepend(info);
-                    }
-                }
-            } else {
-                const item = document.createElement('div');
-                item.className = 'result-item';
-                const confidencePercent = (data.confidence * 100).toFixed(2);
-                item.innerHTML = `
-                    <div>
-                        <div class="result-class">${data.predicted_class}<span class="tooltip">ⓘ<span class="tooltip-text">Single result view. For robustness, try extended or max TTA.</span></span></div>
-                        <div class="confidence-bar">
-                            <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
-                        </div>
-                    </div>
-                    <div class="result-confidence">${confidencePercent}%</div>
-                `;
-                resultsContent.appendChild(item);
-            }
-
+            // Show only the single prediction (class name and confidence)
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            item.style.textAlign = 'center';
+            item.style.flexDirection = 'column';
+            item.style.gap = '10px';
+            
+            const confidencePercent = (data.confidence * 100).toFixed(2);
+            
+            item.innerHTML = `
+                <div class="result-class" style="font-size: 1.8em; margin-bottom: 10px;">${data.predicted_class}</div>
+                <div class="result-confidence" style="font-size: 1.4em;">${confidencePercent}%</div>
+            `;
+            
+            resultsContent.appendChild(item);
             results.classList.add('active');
         }
 

@@ -143,21 +143,10 @@ def predict_with_tta(image_bytes: bytes, threshold_override: Optional[float] = N
         mean_logits = logits.mean(dim=0)
         probabilities = torch.nn.functional.softmax(mean_logits, dim=0)
         confidence, predicted_idx = torch.max(probabilities, 0)
-
-        # Get top 3 predictions
-        top3_probs, top3_indices = torch.topk(probabilities, min(3, len(class_names)))
-        
-        predictions = []
-        for prob, idx in zip(top3_probs, top3_indices):
-            predictions.append({
-                'class': class_names[idx.item()],
-                'confidence': prob.item()
-            })
         
         result = {
             'predicted_class': class_names[predicted_idx.item()],
-            'confidence': confidence.item(),
-            'top_predictions': predictions
+            'confidence': confidence.item()
         }
 
         # Reject low-confidence predictions as out-of-distribution
@@ -221,7 +210,7 @@ async def predict_image(file: UploadFile = File(...), threshold: Optional[float]
         file: Image file (JPEG, PNG)
     
     Returns:
-        JSON with predicted class, confidence, and top predictions
+        JSON with predicted class and confidence
     """
     # Validate file type
     if not file.content_type.startswith('image/'):

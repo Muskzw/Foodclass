@@ -33,7 +33,8 @@ unzip datatang-food101.zip
 ## Step 3: Train Model
 
 ```bash
-python src/train.py --data_dir data --model resnet18 --epochs 10
+python src/train.py --data_dir data --model resnet18 --epochs 5
+
 ```
 
 This will:
